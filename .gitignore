@@ -37,3 +37,16 @@ coverage/
 
 # Render / deployment
 .render/
+
+build/
+
+.DS_Store
+
+.vscode/
+.idea/
+
+*.log
+npm-debug.log
+
+# Puppeteer Chrome cache
+.cache/
