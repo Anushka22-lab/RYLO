@@ -1,20 +1,18 @@
-const { GoogleGenAI } = require("@google/genai")
-const puppeteer = require("puppeteer")
+const { GoogleGenAI } = require("@google/genai");
+const puppeteer = require("puppeteer");
 
 const ai = new GoogleGenAI({
     apiKey: process.env.GOOGLE_GENAI_API_KEY
-})
+});
 
-
-// ===============================
+// =====================================================
 // INTERVIEW REPORT SCHEMA
-// ===============================
+// =====================================================
 
 const interviewReportJsonSchema = {
     type: "object",
 
     properties: {
-
         title: {
             type: "string",
             description: "The job title extracted from the job description."
@@ -28,19 +26,24 @@ const interviewReportJsonSchema = {
         technicalQuestions: {
             type: "array",
             description: "Technical interview questions.",
+
             items: {
                 type: "object",
+
                 properties: {
                     question: {
                         type: "string"
                     },
+
                     intention: {
                         type: "string"
                     },
+
                     answer: {
                         type: "string"
                     }
                 },
+
                 required: [
                     "question",
                     "intention",
@@ -52,19 +55,24 @@ const interviewReportJsonSchema = {
         behavioralQuestions: {
             type: "array",
             description: "Behavioral interview questions.",
+
             items: {
                 type: "object",
+
                 properties: {
                     question: {
                         type: "string"
                     },
+
                     intention: {
                         type: "string"
                     },
+
                     answer: {
                         type: "string"
                     }
                 },
+
                 required: [
                     "question",
                     "intention",
@@ -76,14 +84,18 @@ const interviewReportJsonSchema = {
         skillGaps: {
             type: "array",
             description: "Skills missing from the candidate profile.",
+
             items: {
                 type: "object",
+
                 properties: {
                     skill: {
                         type: "string"
                     },
+
                     severity: {
                         type: "string",
+
                         enum: [
                             "low",
                             "medium",
@@ -91,6 +103,7 @@ const interviewReportJsonSchema = {
                         ]
                     }
                 },
+
                 required: [
                     "skill",
                     "severity"
@@ -101,22 +114,28 @@ const interviewReportJsonSchema = {
         preparationPlan: {
             type: "array",
             description: "Seven day interview preparation plan.",
+
             items: {
                 type: "object",
+
                 properties: {
                     day: {
                         type: "integer"
                     },
+
                     focus: {
                         type: "string"
                     },
+
                     tasks: {
                         type: "array",
+
                         items: {
                             type: "string"
                         }
                     }
                 },
+
                 required: [
                     "day",
                     "focus",
@@ -124,7 +143,6 @@ const interviewReportJsonSchema = {
                 ]
             }
         }
-
     },
 
     required: [
@@ -135,12 +153,11 @@ const interviewReportJsonSchema = {
         "skillGaps",
         "preparationPlan"
     ]
-}
+};
 
-
-// ===============================
+// =====================================================
 // GENERATE INTERVIEW REPORT
-// ===============================
+// =====================================================
 
 async function generateInterviewReport({
     resume,
@@ -161,7 +178,6 @@ ${selfDescription}
 
 JOB DESCRIPTION:
 ${jobDescription}
-
 
 IMPORTANT OUTPUT REQUIREMENTS:
 
@@ -185,7 +201,6 @@ Example:
     "answer": "Explain that middleware functions..."
 }
 
-
 4. Generate EXACTLY 6 behavioral interview questions.
 
 Each behavioral question MUST be an OBJECT with:
@@ -193,7 +208,6 @@ Each behavioral question MUST be an OBJECT with:
 question
 intention
 answer
-
 
 5. Generate EXACTLY 4 skill gaps.
 
@@ -208,7 +222,6 @@ low
 medium
 high
 
-
 6. Generate EXACTLY 7 preparation-plan days.
 
 Each day MUST be an OBJECT with:
@@ -218,7 +231,6 @@ focus
 tasks
 
 tasks must be an ARRAY OF STRINGS.
-
 
 VERY IMPORTANT:
 
@@ -243,73 +255,183 @@ Do not leave any array empty.
 Use the candidate's actual resume and the job description to make the questions relevant.
 
 Return ONLY JSON matching the provided schema.
-`
+`;
 
+    try {
 
-    const response = await ai.models.generateContent({
+        const response = await ai.models.generateContent({
 
-        model: "gemini-3.6-flash",
+            model: "gemini-3.6-flash",
 
-        contents: prompt,
+            contents: prompt,
 
-        config: {
-            responseMimeType: "application/json",
-            responseJsonSchema: interviewReportJsonSchema
-        }
+            config: {
+                responseMimeType: "application/json",
+                responseJsonSchema: interviewReportJsonSchema
+            }
+        });
 
-    })
+        const result = JSON.parse(response.text);
 
+        console.log(
+            "AI GENERATED REPORT:",
+            JSON.stringify(result, null, 2)
+        );
 
-    const result = JSON.parse(response.text)
+        return result;
 
+    } catch (error) {
 
-    console.log(
-        "AI GENERATED REPORT:",
-        JSON.stringify(result, null, 2)
-    )
+        console.error(
+            "Interview report generation failed:",
+            error
+        );
 
-
-    return result
+        throw error;
+    }
 }
 
-
-// ===============================
+// =====================================================
 // PDF GENERATOR
-// ===============================
+// =====================================================
 
 async function generatePdfFromHtml(htmlContent) {
 
-    const browser = await puppeteer.launch()
+    let browser;
 
-    const page = await browser.newPage()
+    try {
 
-    await page.setContent(
-        htmlContent,
-        {
-            waitUntil: "networkidle0"
+        console.log("Launching Puppeteer...");
+
+        browser = await puppeteer.launch({
+
+            headless: true,
+
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--no-zygote"
+            ]
+        });
+
+        console.log("Puppeteer launched successfully.");
+
+        const page = await browser.newPage();
+
+        // Set viewport for consistent PDF rendering
+        await page.setViewport({
+            width: 1280,
+            height: 1800,
+            deviceScaleFactor: 1
+        });
+
+        console.log("Setting HTML content...");
+
+        await page.setContent(
+            htmlContent,
+            {
+                waitUntil: "networkidle2",
+                timeout: 30000
+            }
+        );
+
+        // Wait for fonts/images to finish loading
+        await page.evaluate(async () => {
+
+            if (document.fonts) {
+                await document.fonts.ready;
+            }
+
+            const images = Array.from(
+                document.images
+            );
+
+            await Promise.all(
+                images.map((image) => {
+
+                    if (image.complete) {
+                        return Promise.resolve();
+                    }
+
+                    return new Promise((resolve) => {
+
+                        image.addEventListener(
+                            "load",
+                            resolve,
+                            { once: true }
+                        );
+
+                        image.addEventListener(
+                            "error",
+                            resolve,
+                            { once: true }
+                        );
+                    });
+                })
+            );
+        });
+
+        console.log("Generating PDF...");
+
+        const pdfBuffer = await page.pdf({
+
+            format: "A4",
+
+            printBackground: true,
+
+            preferCSSPageSize: true,
+
+            margin: {
+                top: "15mm",
+                bottom: "15mm",
+                left: "15mm",
+                right: "15mm"
+            }
+        });
+
+        console.log(
+            `PDF generated successfully. Size: ${pdfBuffer.length} bytes`
+        );
+
+        return pdfBuffer;
+
+    } catch (error) {
+
+        console.error(
+            "Puppeteer PDF generation failed:",
+            error
+        );
+
+        throw error;
+
+    } finally {
+
+        if (browser) {
+
+            try {
+
+                await browser.close();
+
+                console.log(
+                    "Puppeteer browser closed."
+                );
+
+            } catch (closeError) {
+
+                console.error(
+                    "Failed to close Puppeteer:",
+                    closeError
+                );
+            }
         }
-    )
-
-    const pdfBuffer = await page.pdf({
-        format: "A4",
-
-        margin: {
-            top: "20mm",
-            bottom: "20mm",
-            left: "15mm",
-            right: "15mm"
-        }
-    })
-
-    await browser.close()
-
-    return pdfBuffer
+    }
 }
 
-
-// ===============================
+// =====================================================
 // GENERATE RESUME PDF
-// ===============================
+// =====================================================
 
 async function generateResumePdf({
     resume,
@@ -325,15 +447,15 @@ async function generateResumePdf({
 
             html: {
                 type: "string",
-                description: "Complete HTML content of the resume."
+                description:
+                    "Complete HTML content of the resume."
             }
-
         },
 
-        required: ["html"]
-
-    }
-
+        required: [
+            "html"
+        ]
+    };
 
     const prompt = `
 Generate a professional ATS-friendly resume.
@@ -347,59 +469,88 @@ ${selfDescription}
 JOB DESCRIPTION:
 ${jobDescription}
 
-
 Requirements:
 
 - Tailor the resume to the job description.
-- The resume should be tailored for the given job description and should highlight the candidate's strengths and relevant experience. The HTML content should be well-formatted and structured, making it easy to read and visually appealing.
-- the response should be a JSON object with a single field "html" which contains the HTML content of the resume which can be converted to PDF using any library like puppeteer.
+- The resume should be tailored for the given job description and should highlight the candidate's strengths and relevant experience.
+- The HTML content should be well-formatted and structured.
 - Highlight relevant skills.
--you can highlight the content using some colors or different font styles but the overall design should be simple and professional.
--The content should be ATS friendly, i.e. it should be easily parsable by ATS systems without losing important information.
--The resume should not be so lengthy, it should ideally be 1-2 pages long when converted to PDF. Focus on quality rather than quantity and make sure to include all the relevant information that can increase the candidate's chances of getting an interview call for the given job description.
+- You can highlight content using subtle colors or different font styles, but the overall design should remain simple and professional.
+- The resume must be ATS friendly.
+- The resume should be easily parsable by ATS systems.
 - Highlight relevant projects and experience.
 - Do not invent experience.
 - Keep it professional.
-- Keep it 1-2 page only.
-- Make it ATS friendly.
--The content of resume should not sound like it's generated by AI and should be as close as possible to a real human-written resume.
+- Keep it 1-2 pages only.
+- Focus on quality rather than quantity.
+- The content should not sound AI-generated.
+- Make it as close as possible to a real human-written resume.
 - Use clean HTML.
 - Use simple professional styling.
-- Return only the HTML inside the JSON field.
-`
+- Do not use external JavaScript.
+- Return ONLY the HTML inside the JSON field.
+`;
 
+    try {
 
-    const response = await ai.models.generateContent({
+        console.log(
+            "Generating resume HTML using Gemini..."
+        );
 
-        model: "gemini-3.6-flash",
+        const response = await ai.models.generateContent({
 
-        contents: prompt,
+            model: "gemini-3.6-flash",
 
-        config: {
-            responseMimeType: "application/json",
-            responseJsonSchema: resumePdfJsonSchema
+            contents: prompt,
+
+            config: {
+                responseMimeType: "application/json",
+                responseJsonSchema: resumePdfJsonSchema
+            }
+        });
+
+        const jsonContent = JSON.parse(
+            response.text
+        );
+
+        if (
+            !jsonContent ||
+            typeof jsonContent.html !== "string" ||
+            !jsonContent.html.trim()
+        ) {
+
+            throw new Error(
+                "Gemini returned invalid resume HTML."
+            );
         }
 
-    })
+        console.log(
+            "Resume HTML generated successfully."
+        );
 
+        const pdfBuffer =
+            await generatePdfFromHtml(
+                jsonContent.html
+            );
 
-    const jsonContent = JSON.parse(response.text)
+        return pdfBuffer;
 
+    } catch (error) {
 
-    const pdfBuffer = await generatePdfFromHtml(
-        jsonContent.html
-    )
+        console.error(
+            "Resume PDF generation failed:",
+            error
+        );
 
-
-    return pdfBuffer
+        throw error;
+    }
 }
 
-
-// ===============================
+// =====================================================
 // EXPORT
-// ===============================
+// =====================================================
 
 module.exports = {
     generateInterviewReport,
     generateResumePdf
-}
+};
