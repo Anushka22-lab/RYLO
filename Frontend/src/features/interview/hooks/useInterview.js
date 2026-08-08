@@ -5,7 +5,12 @@ import {
     generateResumePdf
 } from "../services/interview.api";
 
-import { useContext, useEffect } from "react";
+import {
+    useContext,
+    useEffect,
+    useRef
+} from "react";
+
 import { InterviewContext } from "../interview.context";
 import { useParams } from "react-router";
 
@@ -29,6 +34,9 @@ export const useInterview = () => {
         reports,
         setReports
     } = context;
+
+    // Prevent duplicate PDF requests
+    const pdfGeneratingRef = useRef(false);
 
     // =====================================================
     // GENERATE INTERVIEW REPORT
@@ -74,6 +82,8 @@ export const useInterview = () => {
     // =====================================================
 
     const getReportById = async (id) => {
+
+        if (!id) return;
 
         setLoading(true);
 
@@ -139,6 +149,23 @@ export const useInterview = () => {
 
     const getResumePdf = async (interviewReportId) => {
 
+        // Prevent duplicate/concurrent requests
+        if (pdfGeneratingRef.current) {
+            console.log(
+                "Resume PDF generation already in progress..."
+            );
+            return;
+        }
+
+        if (!interviewReportId) {
+            console.error(
+                "Interview report ID is missing."
+            );
+            return;
+        }
+
+        pdfGeneratingRef.current = true;
+
         setLoading(true);
 
         try {
@@ -174,16 +201,16 @@ export const useInterview = () => {
             link.download =
                 `resume_${interviewReportId}.pdf`;
 
-            // Add link to DOM
             document.body.appendChild(link);
 
-            // Trigger download
             link.click();
 
-            // Cleanup
             document.body.removeChild(link);
 
-            window.URL.revokeObjectURL(url);
+            // Give browser a moment before revoking
+            setTimeout(() => {
+                window.URL.revokeObjectURL(url);
+            }, 100);
 
             console.log(
                 "Resume PDF downloaded successfully."
@@ -199,6 +226,8 @@ export const useInterview = () => {
             throw error;
 
         } finally {
+
+            pdfGeneratingRef.current = false;
 
             setLoading(false);
         }
