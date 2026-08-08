@@ -6,13 +6,169 @@ const ai = new GoogleGenAI({
 });
 
 // =====================================================
+// MODELS
+// =====================================================
+
+// Primary model
+const PRIMARY_MODEL = "gemini-3.6-flash";
+
+// Fallback model
+const FALLBACK_MODEL = "gemini-3.5-flash-lite";
+
+// =====================================================
+// RETRY HELPER
+// =====================================================
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getStatusCode(error) {
+    return (
+        error?.status ||
+        error?.code ||
+        error?.error?.code ||
+        error?.response?.status ||
+        null
+    );
+}
+
+function isRetryableError(error) {
+    const status = getStatusCode(error);
+
+    return (
+        status === 503 ||
+        status === 500 ||
+        status === 502 ||
+        status === 504
+    );
+}
+
+function isQuotaError(error) {
+    const status = getStatusCode(error);
+
+    return status === 429;
+}
+
+// =====================================================
+// GEMINI REQUEST WITH RETRY + FALLBACK
+// =====================================================
+
+async function generateWithFallback(prompt, schema) {
+
+    const models = [
+        PRIMARY_MODEL,
+        FALLBACK_MODEL
+    ];
+
+    let lastError = null;
+
+    for (const model of models) {
+
+        // Only retry 503/5xx a small number of times.
+        const maxRetries = 2;
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+
+            try {
+
+                console.log(
+                    `Gemini request → model=${model}, attempt=${attempt + 1}`
+                );
+
+                const response = await ai.models.generateContent({
+
+                    model,
+
+                    contents: prompt,
+
+                    config: {
+                        responseMimeType: "application/json",
+                        responseJsonSchema: schema
+                    }
+
+                });
+
+                console.log(
+                    `Gemini success → model=${model}`
+                );
+
+                return response;
+
+            } catch (error) {
+
+                lastError = error;
+
+                const status = getStatusCode(error);
+
+                console.error(
+                    `Gemini error → model=${model}, status=${status}`
+                );
+
+                // ==========================================
+                // QUOTA ERROR
+                // ==========================================
+
+                if (isQuotaError(error)) {
+
+                    console.error(
+                        "Gemini quota/rate limit reached."
+                    );
+
+                    // DO NOT repeatedly retry 429.
+                    throw error;
+                }
+
+                // ==========================================
+                // TEMPORARY SERVER ERROR
+                // ==========================================
+
+                if (isRetryableError(error)) {
+
+                    if (attempt < maxRetries) {
+
+                        const delay =
+                            Math.pow(2, attempt) * 2000 +
+                            Math.random() * 1000;
+
+                        console.log(
+                            `Retrying Gemini in ${Math.round(delay)}ms...`
+                        );
+
+                        await sleep(delay);
+
+                        continue;
+                    }
+
+                    console.log(
+                        `Model ${model} failed after retries. Trying fallback...`
+                    );
+
+                    break;
+                }
+
+                // ==========================================
+                // OTHER ERROR
+                // ==========================================
+
+                throw error;
+            }
+        }
+    }
+
+    throw lastError;
+}
+
+// =====================================================
 // INTERVIEW REPORT SCHEMA
 // =====================================================
 
 const interviewReportJsonSchema = {
+
     type: "object",
 
     properties: {
+
         title: {
             type: "string",
             description: "The job title extracted from the job description."
@@ -24,13 +180,15 @@ const interviewReportJsonSchema = {
         },
 
         technicalQuestions: {
+
             type: "array",
-            description: "Technical interview questions.",
 
             items: {
+
                 type: "object",
 
                 properties: {
+
                     question: {
                         type: "string"
                     },
@@ -42,6 +200,7 @@ const interviewReportJsonSchema = {
                     answer: {
                         type: "string"
                     }
+
                 },
 
                 required: [
@@ -49,17 +208,21 @@ const interviewReportJsonSchema = {
                     "intention",
                     "answer"
                 ]
+
             }
+
         },
 
         behavioralQuestions: {
+
             type: "array",
-            description: "Behavioral interview questions.",
 
             items: {
+
                 type: "object",
 
                 properties: {
+
                     question: {
                         type: "string"
                     },
@@ -71,6 +234,7 @@ const interviewReportJsonSchema = {
                     answer: {
                         type: "string"
                     }
+
                 },
 
                 required: [
@@ -78,17 +242,21 @@ const interviewReportJsonSchema = {
                     "intention",
                     "answer"
                 ]
+
             }
+
         },
 
         skillGaps: {
+
             type: "array",
-            description: "Skills missing from the candidate profile.",
 
             items: {
+
                 type: "object",
 
                 properties: {
+
                     skill: {
                         type: "string"
                     },
@@ -101,24 +269,30 @@ const interviewReportJsonSchema = {
                             "medium",
                             "high"
                         ]
+
                     }
+
                 },
 
                 required: [
                     "skill",
                     "severity"
                 ]
+
             }
+
         },
 
         preparationPlan: {
+
             type: "array",
-            description: "Seven day interview preparation plan.",
 
             items: {
+
                 type: "object",
 
                 properties: {
+
                     day: {
                         type: "integer"
                     },
@@ -128,12 +302,15 @@ const interviewReportJsonSchema = {
                     },
 
                     tasks: {
+
                         type: "array",
 
                         items: {
                             type: "string"
                         }
+
                     }
+
                 },
 
                 required: [
@@ -141,8 +318,11 @@ const interviewReportJsonSchema = {
                     "focus",
                     "tasks"
                 ]
+
             }
+
         }
+
     },
 
     required: [
@@ -153,6 +333,7 @@ const interviewReportJsonSchema = {
         "skillGaps",
         "preparationPlan"
     ]
+
 };
 
 // =====================================================
@@ -166,6 +347,7 @@ async function generateInterviewReport({
 }) {
 
     const prompt = `
+
 You are an expert technical recruiter and interview preparation coach.
 
 Generate a complete interview preparation report for this candidate.
@@ -187,23 +369,15 @@ IMPORTANT OUTPUT REQUIREMENTS:
 
 3. Generate EXACTLY 8 technical interview questions.
 
-Each technical question MUST be an OBJECT with:
+Each technical question MUST contain:
 
 question
 intention
 answer
 
-Example:
-
-{
-    "question": "What is middleware in Express.js?",
-    "intention": "To evaluate understanding of Express architecture.",
-    "answer": "Explain that middleware functions..."
-}
-
 4. Generate EXACTLY 6 behavioral interview questions.
 
-Each behavioral question MUST be an OBJECT with:
+Each behavioral question MUST contain:
 
 question
 intention
@@ -211,12 +385,12 @@ answer
 
 5. Generate EXACTLY 4 skill gaps.
 
-Each skill gap MUST be an OBJECT with:
+Each skill gap MUST contain:
 
 skill
 severity
 
-severity must be one of:
+severity must be:
 
 low
 medium
@@ -224,13 +398,13 @@ high
 
 6. Generate EXACTLY 7 preparation-plan days.
 
-Each day MUST be an OBJECT with:
+Each day MUST contain:
 
 day
 focus
 tasks
 
-tasks must be an ARRAY OF STRINGS.
+tasks MUST be an array of strings.
 
 VERY IMPORTANT:
 
@@ -242,53 +416,32 @@ skillGaps MUST be an array of objects.
 
 preparationPlan MUST be an array of objects.
 
-NEVER return numbers such as:
-
-[0,1,2,3]
-
 NEVER return null.
+
+NEVER return numbers instead of objects.
 
 NEVER return strings instead of objects.
 
-Do not leave any array empty.
+Do not leave arrays empty.
 
-Use the candidate's actual resume and the job description to make the questions relevant.
+Use the candidate's actual resume and job description.
 
-Return ONLY JSON matching the provided schema.
+Return ONLY JSON matching the schema.
 `;
 
-    try {
+    const response = await generateWithFallback(
+        prompt,
+        interviewReportJsonSchema
+    );
 
-        const response = await ai.models.generateContent({
+    const result = JSON.parse(response.text);
 
-            model: "gemini-3.6-flash",
+    console.log(
+        "AI GENERATED REPORT:",
+        JSON.stringify(result, null, 2)
+    );
 
-            contents: prompt,
-
-            config: {
-                responseMimeType: "application/json",
-                responseJsonSchema: interviewReportJsonSchema
-            }
-        });
-
-        const result = JSON.parse(response.text);
-
-        console.log(
-            "AI GENERATED REPORT:",
-            JSON.stringify(result, null, 2)
-        );
-
-        return result;
-
-    } catch (error) {
-
-        console.error(
-            "Interview report generation failed:",
-            error
-        );
-
-        throw error;
-    }
+    return result;
 }
 
 // =====================================================
@@ -297,83 +450,31 @@ Return ONLY JSON matching the provided schema.
 
 async function generatePdfFromHtml(htmlContent) {
 
-    let browser;
+    console.log("Launching Puppeteer...");
+
+    const browser = await puppeteer.launch({
+
+        headless: true,
+
+        args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu"
+        ]
+
+    });
 
     try {
 
-        console.log("Launching Puppeteer...");
-
-        browser = await puppeteer.launch({
-
-            headless: true,
-
-            args: [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--no-zygote"
-            ]
-        });
-
-        console.log("Puppeteer launched successfully.");
-
         const page = await browser.newPage();
-
-        // Set viewport for consistent PDF rendering
-        await page.setViewport({
-            width: 1280,
-            height: 1800,
-            deviceScaleFactor: 1
-        });
-
-        console.log("Setting HTML content...");
 
         await page.setContent(
             htmlContent,
             {
-                waitUntil: "networkidle2",
-                timeout: 30000
+                waitUntil: "networkidle0"
             }
         );
-
-        // Wait for fonts/images to finish loading
-        await page.evaluate(async () => {
-
-            if (document.fonts) {
-                await document.fonts.ready;
-            }
-
-            const images = Array.from(
-                document.images
-            );
-
-            await Promise.all(
-                images.map((image) => {
-
-                    if (image.complete) {
-                        return Promise.resolve();
-                    }
-
-                    return new Promise((resolve) => {
-
-                        image.addEventListener(
-                            "load",
-                            resolve,
-                            { once: true }
-                        );
-
-                        image.addEventListener(
-                            "error",
-                            resolve,
-                            { once: true }
-                        );
-                    });
-                })
-            );
-        });
-
-        console.log("Generating PDF...");
 
         const pdfBuffer = await page.pdf({
 
@@ -381,51 +482,21 @@ async function generatePdfFromHtml(htmlContent) {
 
             printBackground: true,
 
-            preferCSSPageSize: true,
-
             margin: {
-                top: "15mm",
-                bottom: "15mm",
+                top: "20mm",
+                bottom: "20mm",
                 left: "15mm",
                 right: "15mm"
             }
-        });
 
-        console.log(
-            `PDF generated successfully. Size: ${pdfBuffer.length} bytes`
-        );
+        });
 
         return pdfBuffer;
 
-    } catch (error) {
-
-        console.error(
-            "Puppeteer PDF generation failed:",
-            error
-        );
-
-        throw error;
-
     } finally {
 
-        if (browser) {
+        await browser.close();
 
-            try {
-
-                await browser.close();
-
-                console.log(
-                    "Puppeteer browser closed."
-                );
-
-            } catch (closeError) {
-
-                console.error(
-                    "Failed to close Puppeteer:",
-                    closeError
-                );
-            }
-        }
     }
 }
 
@@ -450,14 +521,17 @@ async function generateResumePdf({
                 description:
                     "Complete HTML content of the resume."
             }
+
         },
 
         required: [
             "html"
         ]
+
     };
 
     const prompt = `
+
 Generate a professional ATS-friendly resume.
 
 RESUME:
@@ -472,78 +546,49 @@ ${jobDescription}
 Requirements:
 
 - Tailor the resume to the job description.
-- The resume should be tailored for the given job description and should highlight the candidate's strengths and relevant experience.
-- The HTML content should be well-formatted and structured.
 - Highlight relevant skills.
-- You can highlight content using subtle colors or different font styles, but the overall design should remain simple and professional.
-- The resume must be ATS friendly.
-- The resume should be easily parsable by ATS systems.
 - Highlight relevant projects and experience.
 - Do not invent experience.
 - Keep it professional.
-- Keep it 1-2 pages only.
-- Focus on quality rather than quantity.
-- The content should not sound AI-generated.
-- Make it as close as possible to a real human-written resume.
+- Keep it 1-2 pages.
+- Make it ATS friendly.
 - Use clean HTML.
 - Use simple professional styling.
-- Do not use external JavaScript.
-- Return ONLY the HTML inside the JSON field.
+- The resume should sound human-written.
+- Use only information present in the candidate data.
+- Return ONLY JSON matching the provided schema.
+
+The JSON must contain exactly one field:
+
+html
+
+The html field must contain the complete resume HTML.
 `;
 
-    try {
+    console.log(
+        "Generating resume HTML using Gemini..."
+    );
 
-        console.log(
-            "Generating resume HTML using Gemini..."
-        );
+    const response = await generateWithFallback(
+        prompt,
+        resumePdfJsonSchema
+    );
 
-        const response = await ai.models.generateContent({
+    const jsonContent = JSON.parse(response.text);
 
-            model: "gemini-3.6-flash",
+    console.log(
+        "Resume HTML generated successfully."
+    );
 
-            contents: prompt,
+    const pdfBuffer = await generatePdfFromHtml(
+        jsonContent.html
+    );
 
-            config: {
-                responseMimeType: "application/json",
-                responseJsonSchema: resumePdfJsonSchema
-            }
-        });
+    console.log(
+        "Resume PDF generated successfully."
+    );
 
-        const jsonContent = JSON.parse(
-            response.text
-        );
-
-        if (
-            !jsonContent ||
-            typeof jsonContent.html !== "string" ||
-            !jsonContent.html.trim()
-        ) {
-
-            throw new Error(
-                "Gemini returned invalid resume HTML."
-            );
-        }
-
-        console.log(
-            "Resume HTML generated successfully."
-        );
-
-        const pdfBuffer =
-            await generatePdfFromHtml(
-                jsonContent.html
-            );
-
-        return pdfBuffer;
-
-    } catch (error) {
-
-        console.error(
-            "Resume PDF generation failed:",
-            error
-        );
-
-        throw error;
-    }
+    return pdfBuffer;
 }
 
 // =====================================================
