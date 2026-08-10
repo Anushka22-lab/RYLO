@@ -472,7 +472,8 @@ async function generatePdfFromHtml(htmlContent) {
         await page.setContent(
             htmlContent,
             {
-                waitUntil: "networkidle0"
+               waitUntil: "domcontentloaded",
+        timeout: 30000
             }
         );
 
